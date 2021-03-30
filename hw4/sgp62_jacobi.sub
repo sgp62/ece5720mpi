@@ -1,0 +1,12 @@
+#!/bin/bash
+#SBATCH -J sgp62_jacobi # Job name
+#SBATCH -o output/sgp62_jacobi.o%j # stdout output file(%j expands to jobId)
+#SBATCH -e output/sgp62_jacobi.e%j # stderr output file(%j expands to jobId)
+#SBATCH --nodes=6 # number of nodes requested
+#SBATCH --ntasks=12 # number of tasks to be configured for.
+#SBATCH --tasks-per-node=2 # number of tasks to run on each node.
+#SBATCH --cpus-per-task=1 # number of cpus needed by each task
+#SBATCH --get-user-env # retrieve the users login environment.
+#SBATCH -t 00:10:00 # Run time (hh:mm:ss)
+#SBATCH --mem-per-cpu=1000 # memory required per allocated CPU
+#SBATCH --partition=six # Which queue it should run on.

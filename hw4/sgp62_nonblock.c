@@ -27,6 +27,14 @@ int main (int argc, char *argv[])
 /* declear parameters, some are already used below in the template       */
   MPI_Status status, stats[2];
   MPI_Request reqs[2];
+  int dest;
+  char host[MPI_MAX_PROCESSOR_NAME];
+  int taskpairs[MAXTASKS];
+  char hostmap[MAXTASKS][MPI_MAX_PROCESSOR_NAME];
+
+  int msgbuf[ENDSIZE];
+
+
 
 /***************************** initialization *****************************/ 
   int my_rank, n_tasks;
@@ -37,9 +45,15 @@ int main (int argc, char *argv[])
   start = STARTSIZE; end = ENDSIZE; mult = MULT; repet = REPETITIONS;
 
 /* open file for writing timing results                                   */
+  FILE *tp = NULL;            
+  tp = fopen("nonblock_time.csv", "w");
 
 /* fill-in the message buffer "msgbuf" of length MAXLENGTH, progressively *
  * longer parts of the buffer will be send/recived by pair of PEs         */
+  for(int i = 0; i < ENDSIZE; i++){
+    msgbuf[i] = i;
+  }
+
 
 /* get the processor name and send it to the master, remember that message *
  * from PE i is stored at position i in the receive buffor hostmap         */
@@ -48,9 +62,18 @@ int main (int argc, char *argv[])
           MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0, MPI_COMM_WORLD);
 
 /* Establish send/receive partners and communicate to task 0  *
- * pair (src,dest) are either (my_rank,my_rank+n_tasks/2) or  *
+ * pair (src,dest) are either (my_rank,my_rank+n_tas  `ks/2) or  *
  * (my_rank,my_rank-n_tasks/2)                                *
  * task pairs are transmitted to the master using MPI_Gather  */
+  for(int i = 0; i < n_tasks; i++){
+    if(my_rank < n_tasks/2){
+      dest = n_tasks/2 + my_rank;
+    }
+    if(my_rank >= n_tasks/2){
+      dest =  my_rank - n_tasks/2;
+    }
+    taskpairs[my_rank] = dest;
+  }
 
 /* Report the set-up */
 if (my_rank == 0) {

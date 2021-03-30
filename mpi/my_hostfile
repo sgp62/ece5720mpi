@@ -1,0 +1,6 @@
+en-openmpi00.ece.cornell.edu slots=32 max-slots=32
+#en-openmpi01.ece.cornell.edu:16
+en-openmpi02.ece.cornell.edu slots=16 max-slots=16
+en-openmpi03.ece.cornell.edu:16
+en-openmpi04.ece.cornell.edu:16
+
