@@ -16,23 +16,28 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define MAXTASKS      144       /* max number of nodes in the cluster   */
+#define MAXTASKS      12       /* max number of nodes in the cluster   */
 #define STARTSIZE     1         /* start by sending one element         */
 #define ENDSIZE       1000000   /* finish by sending ENDSIZE elements   */
 #define MULT          10        /* next message size multiplied by MULT */  
 #define REPETITIONS   20        /* repeat 20 times for each length      */
+#define iters         7
 
 int main (int argc, char *argv[])
 {
 /* declear parameters, some are already used below in the template       */
   MPI_Status status, stats[2];
   MPI_Request reqs[2];
-  int dest;
+  int src, dest;
   char host[MPI_MAX_PROCESSOR_NAME];
   int taskpairs[MAXTASKS];
   char hostmap[MAXTASKS][MPI_MAX_PROCESSOR_NAME];
 
-  int msgbuf[ENDSIZE];
+  char msgbuf[ENDSIZE];
+  double start_time, end_time;
+  double avg_time=0;
+  int tag=0;
+  double avg_data[MAXTASKS];
 
 
 
@@ -41,8 +46,10 @@ int main (int argc, char *argv[])
   MPI_Init(&argc,&argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
   MPI_Comm_size(MPI_COMM_WORLD, &n_tasks);
-
-  start = STARTSIZE; end = ENDSIZE; mult = MULT; repet = REPETITIONS;
+  int start = STARTSIZE;
+  int end = ENDSIZE; 
+  int mult = MULT; 
+  int repet = REPETITIONS;
 
 /* open file for writing timing results                                   */
   FILE *tp = NULL;            
@@ -51,12 +58,14 @@ int main (int argc, char *argv[])
 /* fill-in the message buffer "msgbuf" of length MAXLENGTH, progressively *
  * longer parts of the buffer will be send/recived by pair of PEs         */
   for(int i = 0; i < ENDSIZE; i++){
-    msgbuf[i] = i;
+    msgbuf[i] = 'a';
   }
 
 
 /* get the processor name and send it to the master, remember that message *
  * from PE i is stored at position i in the receive buffor hostmap         */
+  int namelength = MPI_MAX_PROCESSOR_NAME;
+
   MPI_Get_processor_name(host, &namelength);
   MPI_Gather(&host, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, &hostmap,
           MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0, MPI_COMM_WORLD);
@@ -65,66 +74,93 @@ int main (int argc, char *argv[])
  * pair (src,dest) are either (my_rank,my_rank+n_tas  `ks/2) or  *
  * (my_rank,my_rank-n_tasks/2)                                *
  * task pairs are transmitted to the master using MPI_Gather  */
-  for(int i = 0; i < n_tasks; i++){
-    if(my_rank < n_tasks/2){
-      dest = n_tasks/2 + my_rank;
-    }
-    if(my_rank >= n_tasks/2){
-      dest =  my_rank - n_tasks/2;
-    }
-    taskpairs[my_rank] = dest;
+  if(my_rank < n_tasks/2){
+    src = dest = n_tasks/2 + my_rank;
   }
+  if(my_rank >= n_tasks/2){
+    src = dest =  my_rank - n_tasks/2;
+  }
+  MPI_Gather(&dest, 1, MPI_INT, &taskpairs, 1, MPI_INT, 0, MPI_COMM_WORLD); //OH
+  //mpicc ...c
+  //!mpir
+
 
 /* Report the set-up */
-if (my_rank == 0) {
-  resolution = MPI_Wtick();
-  printf("\n******************** MPI Bandwidth Test ********************\n");
-  printf("Message start size= %d bytes\n",start);
-  printf("Message finish size= %d bytes\n",end);
-  printf("Incremented by %d bytes per iteration\n",mult);
-  printf("Roundtrips per iteration= %d\n",repet);
-  printf("MPI_Wtick resolution = %e\n",resolution);
-  printf("************************************************************\n");
-  for (i=0; i<n_tasks; i++)
-    printf("task %3d is on %s partners with %3d\n",i,hostmap[i],taskpairs[i]);
-  printf("************************************************************\n");
+  if (my_rank == 0) {
+    double resolution = MPI_Wtick();
+    printf("\n******************** MPI Bandwidth Test ********************\n");
+    printf("Message start size= %d bytes\n",start);
+    printf("Message finish size= %d bytes\n",end);
+    printf("Incremented by %d bytes per iteration\n",mult);
+    printf("Roundtrips per iteration= %d\n",repet);
+    printf("MPI_Wtick resolution = %e\n",resolution);
+    printf("************************************************************\n");
+    for (int i=0; i<n_tasks; i++)
+      printf("task %3d is on %s partners with %3d\n",i,hostmap[i],taskpairs[i]);
+    printf("************************************************************\n");
   }
-
 /*************************** first group of tasks *************************
  * The first group use nonblocking send/receive to communicate with their *
  * partners, calculate the bandwidth for each message size and report to  *
  * to the master timing per byte transmitted.                             * 
  * **************************************************************************/
-
+  double local_avg[MAXTASKS];
+  int k = 0;
   if (my_rank < n_tasks/2) {
-    for (n = start; n <= end; n = n*mult) {
-      n_bytes =  sizeof(char) * n;
-      for (i = 1; i <= repet; i++){
-// start timer
-        MPI_Isend(&msgbuf, .......);
-        MPI_Irecv(&msgbuf, .......); 
+    for (int n = start; n <= end; n = n*mult) {
+      avg_time = 0;
+      int n_bytes =  sizeof(char) * n;
+      for (int i = 1; i <= repet; i++){
+        // start timer
+        start_time = MPI_Wtime();
+        MPI_Isend(&msgbuf, n, MPI_CHAR, dest, tag, MPI_COMM_WORLD, &reqs[0]);
+        MPI_Irecv(&msgbuf, n, MPI_CHAR, src, tag, MPI_COMM_WORLD, &reqs[1]); 
         MPI_Waitall(2, reqs, stats);
-// stop timer
+        // stop timer
+        end_time = MPI_Wtime();
+        avg_time += end_time - start_time;
       }
+      avg_time = avg_time / repet;
+      avg_time = avg_time / n;
+      local_avg[k] = avg_time;
+      printf("%d %1.3e\n", k, local_avg[k]);
+      k+=1;
 /* tasks send their timings to task 0 */
     }
-}
 
+    //MPI_Gather(&avg_time, 1, MPI_DOUBLE, &avg_data, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  }
+  //if(my_rank == 0){
+    //printf("First if\n");
+  MPI_Ireduce(&local_avg, &avg_data, MAXTASKS, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD, &reqs[2]);
+  //MPI_Waitall(MAXTASKS, reqs, stats);
+
+ //}
+  if(my_rank == 0){
+    for(int i = 0; i < n_tasks/2; i++){
+      printf("%1.3e \n", avg_data[i]);
+      avg_data[i] = avg_data[i] / (MAXTASKS/2);
+      fprintf(tp, "%1.3e\n", avg_data[i]);
+    }
+  }
+  printf("After first\n");
 /**************************** second half of tasks **************************
 /* The second group use nonblocking receive/send to communicate with  their *
  * partners tasks, timing is taken by the first group                       */
 
   if (my_rank >= n_tasks/2) {
-    for (n = start; n <= end; n = n*mult) {
-      for (i=1; i<=repet; i++){
-        MPI_Irecv(&msgbuf, .......);
-        MPI_Isend(&msgbuf, .......);
+    for (int n = start; n <= end; n = n*mult) {
+      int n_bytes =  sizeof(char) * n;
+      for (int i=1; i<=repet; i++){
+        MPI_Irecv(&msgbuf, n, MPI_CHAR, src, tag, MPI_COMM_WORLD, &reqs[1]);
+        MPI_Isend(&msgbuf, n, MPI_CHAR, dest, tag, MPI_COMM_WORLD, &reqs[0]);
         MPI_Waitall(2, reqs, stats);
       }
     }
   }
-
-MPI_Finalize();
+  
+  MPI_Finalize();
+  fclose(tp);
 
 }  /* end of main */
 
