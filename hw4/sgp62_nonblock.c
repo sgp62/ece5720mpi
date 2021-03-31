@@ -1,3 +1,4 @@
+//Stefen Pegels, sgp62
 /********************************************************************
  * Point-to-point nonblocking bandwidth benchmark                   *
  * Adopted from llnl.gov/tutorials                                  *
@@ -21,7 +22,7 @@
 #define ENDSIZE       1000000   /* finish by sending ENDSIZE elements   */
 #define MULT          10        /* next message size multiplied by MULT */  
 #define REPETITIONS   20        /* repeat 20 times for each length      */
-#define iters         7
+#define ITERS         7
 
 int main (int argc, char *argv[])
 {
@@ -37,8 +38,8 @@ int main (int argc, char *argv[])
   double start_time, end_time;
   double avg_time=0;
   int tag=0;
-  double avg_data[MAXTASKS];
-
+  double avg_data[MAXTASKS*ITERS];
+  double finaltiming[ITERS];
 
 
 /***************************** initialization *****************************/ 
@@ -50,6 +51,13 @@ int main (int argc, char *argv[])
   int end = ENDSIZE; 
   int mult = MULT; 
   int repet = REPETITIONS;
+
+  
+  int sizes[1] = {MAXTASKS};
+  int subsizes[1] = {ITERS};
+  int sstart[1] = {0};
+  MPI_Datatype rowvec;
+  MPI_Type_create_subarray(1, sizes, subsizes, sstart, MPI_ORDER_C, MPI_DOUBLE, &rowvec);
 
 /* open file for writing timing results                                   */
   FILE *tp = NULL;            
@@ -104,7 +112,7 @@ int main (int argc, char *argv[])
  * partners, calculate the bandwidth for each message size and report to  *
  * to the master timing per byte transmitted.                             * 
  * **************************************************************************/
-  double local_avg[MAXTASKS];
+  double local_avg[ITERS];
   int k = 0;
   if (my_rank < n_tasks/2) {
     for (int n = start; n <= end; n = n*mult) {
@@ -123,27 +131,36 @@ int main (int argc, char *argv[])
       avg_time = avg_time / repet;
       avg_time = avg_time / n;
       local_avg[k] = avg_time;
-      printf("%d %1.3e\n", k, local_avg[k]);
       k+=1;
 /* tasks send their timings to task 0 */
     }
+    //MPI_Gather(&local_avg, 1, rowvec, &avg_data, 1, rowvec, 0, MPI_COMM_WORLD);
 
-    //MPI_Gather(&avg_time, 1, MPI_DOUBLE, &avg_data, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
   }
+  MPI_Gather(&local_avg, ITERS, MPI_DOUBLE, &avg_data, ITERS, MPI_DOUBLE, 0, MPI_COMM_WORLD);
   //if(my_rank == 0){
     //printf("First if\n");
-  MPI_Ireduce(&local_avg, &avg_data, MAXTASKS, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD, &reqs[2]);
+  //MPI_Ireduce(&local_avg, &avg_data, MAXTASKS, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD, &reqs[2]);
   //MPI_Waitall(MAXTASKS, reqs, stats);
 
  //}
   if(my_rank == 0){
-    for(int i = 0; i < n_tasks/2; i++){
-      printf("%1.3e \n", avg_data[i]);
-      avg_data[i] = avg_data[i] / (MAXTASKS/2);
-      fprintf(tp, "%1.3e\n", avg_data[i]);
+    for(int i = 1; i <= ITERS; i++){
+      finaltiming[i-1] = 0;
+      for(int j = 0; j < n_tasks/2; j++){
+        finaltiming[i-1] += avg_data[j*ITERS + i-1];
+      }
+    }
+    // for(int i = 0; i < (ITERS *n_tasks/2); i++){
+    //   fprintf(tp, "%1.3e\n", avg_data[i]);
+    // }
+    for(int i = 0; i < ITERS; i++){
+      fprintf(tp, "%d, ", i);
+      fprintf(tp, "%1.3e, ", finaltiming[i]);
+      fprintf(tp, "\n");
     }
   }
-  printf("After first\n");
 /**************************** second half of tasks **************************
 /* The second group use nonblocking receive/send to communicate with  their *
  * partners tasks, timing is taken by the first group                       */
@@ -161,6 +178,7 @@ int main (int argc, char *argv[])
   
   MPI_Finalize();
   fclose(tp);
+
 
 }  /* end of main */
 

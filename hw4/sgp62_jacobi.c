@@ -1,3 +1,4 @@
+//Stefen Pegels, sgp62
 /* Bren-Luk permutation for one sided Jacobi iteration for finding    *
  * the SVD of an N by K_COLUMNS matrix A, N even                      *
  * there are npes Processing Elements, npes even,                     *
@@ -99,36 +100,36 @@ int main(int argc, char ** argv) {
 /* iterate until termination criteria are not met      */
 while((threshold < error)&&(iter < MAX_ITER)) {
 
-/* perform full sweep                                   */
-for (k=0;k<2*npes-1;k++)  {
+  /* perform full sweep                                   */
+  for (k=0;k<2*npes-1;k++)  {
 	
-/* orthogonalize consecutive (odd,even) rows            */
+    /* orthogonalize consecutive (odd,even) rows            */
 
-  if ((rank>0)&&(rank<npes-1)&&(rank%2==0)){
-/* send right second last row,        *
- * receive from right to the last row *
- *                                    *
- * send left second row               *
- * receive from left to first row     */
-  }
+    if ((rank>0)&&(rank<npes-1)&&(rank%2==0)){
+    /* send right second last row,        *
+    * receive from right to the last row *
+    *                                    *
+    * send left second row               *
+    * receive from left to first row     */
+    }
 
-  if (rank==0){
-// send right second last row, receive from right to last
-  }
+    if (rank==0){
+    // send right second last row, receive from right to last
+    }
   
-  if (rank == npes-1){
-// receive from left to first row, send left second to last 
-  }
+    if (rank == npes-1){
+    // receive from left to first row, send left second to last 
+    }
 
-  if ((rank>0)&&(rank<npes-1)&&(rank%2==1)){
-/*  receive from left to the first row  *
- *  send left second row to last        *
- *                                      *
- *  receive from right to last,         *
- *  sendright second last to first      */
-  }
+    if ((rank>0)&&(rank<npes-1)&&(rank%2==1)){
+    /*  receive from left to the first row  *
+    *  send left second row to last        *
+    *                                      *
+    *  receive from right to last,         *
+    *  sendright second last to first      */
+    }
   
-} /* end the k loop */
+  } /* end the k loop */
 
 /* check termination criteria */
 } /* end wwhile loop          */
