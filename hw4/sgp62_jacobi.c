@@ -30,256 +30,11 @@
 #define P_ROWS    2       /* number of rows per PE                     */ // M = P_ROWS * npes
 #define K_COLUMNS 4       /* number of columns                         */
 
-int main(int argc, char ** argv) {
-  int rank, npes, right, left, row_size, recvd_count;
-  int rc, i, j, k, N;
-  int * A;
-
-// start MPI environment
-  MPI_Init(&argc, &argv);
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &npes);
-  MPI_Status stats[2];
-  MPI_Request reqs[2];
-
-  MPI_Datatype row_type;
-
-  N = P_ROWS*K_COLUMNS*npes;
-
-/* the master generates matrix A
- * in this example rows of are
- * [0 0 ...0] for row 0
- * [1 1 ...1] for row 1, etc.
- * this done to check whether permutations are correct
- * needs to be removed when correctness is checked      */
-
-  if(rank == 0) {
-    A = (float *) malloc(N*sizeof(float));
-    printf("there are %d PEs\n",npes);
-    printf("size of A is %d by %d\n",N,N);
-    for(i = 0; i < npes; i++){ 
-      for(j=0;j<P_ROWS;j++) {
-        for(k=0;k<K_COLUMNS;k++) {
-          A[i*P_ROWS*K_COLUMNS+j*K_COLUMNS+k] = (float)P_ROWS*i+j;
-          printf("%.3f ",A[i*P_ROWS*K_COLUMNS+j*K_COLUMNS+k]);
-        }
-        printf("\n");
-      }
-    printf("--------------------\n");
-    }
-    for(k=0;k<N;k++) printf("%.3f ",A[k]);
-      printf("\n");
-  }
-
-/* Scatter the rows to npes processes */
-  int num_el = N/npes;
-  float * A_local = (float *) malloc(num_el*sizeof(float));
-  MPI_Scatter(A, num_el, MPI_FLOAT, A_local, num_el, MPI_FLOAT, //Ask question about sending both rows
-		     0, MPI_COMM_WORLD);
-
-  
-/* you may want to check here whether MPI_Scatter was correct */
-  //Each PE should have P_ROWS rows, which have K_COLUMNS elements ( P_ROWS*K_COLUMNS elems per PE)
-  printf("Scatter Check\n");
-  for(int i = 0; i < P_ROWS; i++){
-    for(int j = 0; j < K_COLUMNS; j++){
-      printf("%.3f ", A_local[i*P_ROWS + j]);
-    }
-    printf("\n");
-  }
-
-/* buffers for send and receive rows */
-  // float *l_buf_l = (float *)calloc(K_COLUMNS, sizeof(float));
-  // float *l_buf_r = (float *)calloc(K_COLUMNS, sizeof(float));
-  // float *r_buf_l = (float *)calloc(K_COLUMNS, sizeof(float));
-  // float *r_buf_r = (float *)calloc(K_COLUMNS, sizeof(float));
-
-  float *l_buf_s = (float *)calloc(K_COLUMNS, sizeof(float));
-  float *l_buf_r = (float *)calloc(K_COLUMNS, sizeof(float));
-  float *r_buf_s = (float *)calloc(K_COLUMNS, sizeof(float));
-  float *r_buf_r = (float *)calloc(K_COLUMNS, sizeof(float));
-
-/* Create the row_type for exchanging rows among PEs */
-/* The length of a row is K_COLUMNS                  */
-  MPI_Type_contiguous(K_COLUMNS, MPI_FLOAT, &row_type);
-  MPI_Type_commit(&row_type);
-  MPI_Type_size(row_type,&row_size);
-
-/* starting addresses for second last and last  row in A_local * //
- * these locations will be updated (swapped)                   */
-  int second_last = K_COLUMNS*(P_ROWS-2);
-  int second = K_COLUMNS;
-  int last_row = K_COLUMNS*(P_ROWS-1);
-
-  //row numbers for A_local rows (will change)
-  //Each PE will get two rows in the initial scatter
-  int first = my_rank * 2;
-  int second = my_rank * 2 + 1;
-
-  //threshold, error, iter, MAX_ITER not defined
-
-/* iterate until termination criteria are not met      */ //Threshold is norm of matrix * # of elemens * Precision of float or double see Ed
-//while((threshold < error)&&(iter < MAX_ITER)) {
-
-  /* perform full sweep                                   */ //Any pair of rows is orthogonal(product is 0), that is equivalent to knowing A * A^T being diagonal
-                                                            //Solve for cp and sp matrix, page 2 and 3(use quadratic)
-  for (k=0;k<2*npes-1;k++)  {
-                                                              //Swap rows with the communication ring
-                                                              //Final A is already computed as the sigma * UT, 
-    /* orthogonalize consecutive (odd,even) rows            */ //Helper Function?
-    //Rotation
-    givens_rotate(A_local);
-    //Update A
-    for(int i = 0; i < K_COLUMNS; i++){
-      A[first*K_COLUMNS + i] = A_local[i];
-      A[second*K_COLUMNS + i] = A_local[K_COLUMNS+i];
-    }
-    if ((rank>0)&&(rank<npes-1)&&){
-      //Deposit A_local into buffers to be sent
-      for(int i = 0; i < K_COLUMNS; i++){
-        l_buf_s[i] = A_local[i];
-        r_buf_s[i] = A_local[K_COLUMNS+i];
-      }
-      //send left buffer to the right
-      MPI_Send(&l_buf_s, K_COLUMNS, MPI_FLOAT, my_rank+1, 0, MPI_COMM_WORLD);
-      //receive from left for left buffer
-      MPI_Recv(&l_buf_r, K_COLUMNS, MPI_FLOAT, my_rank-1, 0, MPI_COMM_WORLD);
-      //send right buffer to the left
-      MPI_Send(&r_buf_s, K_COLUMNS, MPI_FLOAT, my_rank-1, 0, MPI_COMM_WORLD);
-      //receive from right for right buffer
-      MPI_Recv(&r_buf_r, K_COLUMNS, MPI_FLOAT, my_rank+1, 0, MPI_COMM_WORLD); 
-      
-      //Deposit receive buffers into A_local
-      for(int i = 0; i < K_COLUMNS; i++){
-        A_local[i] = l_buf_r[i];
-        A_local[K_COLUMNS+i] = r_buf_r[i];
-      }
-      //Update first row logic for A update
-      if(first == 2){
-        first = 1;
-      }
-      else if(first%2==0){
-        first -= 2;
-      }
-      else if(first == npes*2 -1){
-        first = npes*2 -2;
-      }
-      else if(first%2==1){
-        first += 2;
-      }
-      //Update second row logic for A update
-      if(second == 2){
-        second = 1;
-      }
-      else if(second%2==0){
-        second -= 2;
-      }
-      else if(second == npes*2 -1){
-        second = npes*2 -2;
-      }
-      else if(second%2==1){
-        second += 2;
-      }
-    }
-
-    if (rank==0){
-      //First row is always the same - always row 0
-      for(int i = 0; i < K_COLUMNS; i++){
-        r_buf_s[i] = A_local[K_COLUMNS+i];
-      }
-      //send right to the right
-      MPI_Send(&r_buf_s, K_COLUMNS, MPI_FLOAT, my_rank+1, 0, MPI_COMM_WORLD);
-      //receive from right 
-      MPI_Recv(&r_buf_r, K_COLUMNS, MPI_FLOAT, my_rank+1, 0, MPI_COMM_WORLD); 
-
-      for(int i = 0; i < K_COLUMNS; i++){
-        A_local[K_COLUMNS+i] = r_buf_r[i];
-      }
-      //First is always 0
-      first = 0;
-      //Update second row logic for A update
-      if(second == 2){
-        second = 1;
-      }
-      else if(second%2==0){
-        second -= 2;
-      }
-      else if(second == npes*2 -1){
-        second = npes*2 -2;
-      }
-      else if(second%2==1){
-        second += 2;
-      }
-    }
-
-    if (rank == npes-1){
-      for(int i = 0; i < K_COLUMNS; i++){
-        l_buf_s[i] = A_local[i]; //Moves to right, held here as a temp
-        r_buf_s[i] = A_local[K_COLUMNS+i];
-      }
-      // receive from left
-      MPI_Recv(&l_buf_r, K_COLUMNS, MPI_FLOAT, my_rank-1, 0, MPI_COMM_WORLD); 
-      //send right buffer to the left
-      MPI_Send(&r_buf_s, K_COLUMNS, MPI_FLOAT, my_rank-1, 0, MPI_COMM_WORLD);
-      for(int i = 0; i < K_COLUMNS; i++){
-        A_local[i] = l_buf_r[i];
-        A_local[K_COLUMNS+i] = l_buf_s[i];
-      }
-      //Update first row logic for A update
-      if(first == 2){
-        first = 1;
-      }
-      else if(first%2==0){
-        first -= 2;
-      }
-      else if(first == npes*2 -1){
-        first = npes*2 -2;
-      }
-      else if(first%2==1){
-        first += 2;
-      }
-      //Update second row logic for A update
-      if(second == 2){
-        second = 1;
-      }
-      else if(second%2==0){
-        second -= 2;
-      }
-      else if(second == npes*2 -1){
-        second = npes*2 -2;
-      }
-      else if(second%2==1){
-        second += 2;
-      }
-    }
-
-  } /* end the k loop */
-
-  if(my_rank == 0){
-    for(int i = 0; i < 2*npes-1; i++){
-      for(int j = 0; j < K_COLUMNS; j++){
-        printf("%.3f ", A[i*K_COLUMNS +j]);
-      }
-      print("\n");
-    }
-  }
-
-/* check termination criteria */
-//} /* end wwhile loop          */
-
-  free((void *) A_local);
-   
-  if(rank == 0)  free((void *)A);
-
-  MPI_Finalize();
-  return 0;
-}
-
-void givens_rotate(*A){
+void givens_rotate(float *A){
   float * temp = (float *) malloc(K_COLUMNS*P_ROWS * sizeof(float));
-  float * b = (float *) calloc(4*sizeof(float));
+  float * b = (float *) calloc(4,sizeof(float));
   //float * g = (float *) calloc(4*sizeof(float));
-  float * gT = (float *) calloc(4*sizeof(float));
+  float * gT = (float *) calloc(4,sizeof(float));
   //Create b out of the rows of A multiplied
   for(int i = 0; i < P_ROWS; i++){
     for(int j = 0; j < P_ROWS; j++){
@@ -327,4 +82,255 @@ void givens_rotate(*A){
     }
   }
 }
+
+int main(int argc, char ** argv) {
+  int rank, npes, right, left, row_size, recvd_count;
+  int rc, i, j, k, N;
+  float * A;
+
+// start MPI environment
+  MPI_Init(&argc, &argv);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &npes);
+  MPI_Status stats[2];
+  MPI_Request reqs[2];
+
+  MPI_Datatype row_type;
+
+  N = P_ROWS*K_COLUMNS*npes;
+
+/* the master generates matrix A
+ * in this example rows of are
+ * [0 0 ...0] for row 0
+ * [1 1 ...1] for row 1, etc.
+ * this done to check whether permutations are correct
+ * needs to be removed when correctness is checked      */
+
+  if(rank == 0) {
+    A = (float *) malloc(N*sizeof(float));
+    printf("there are %d PEs\n",npes);
+    printf("size of A is %d by %d\n",npes*P_ROWS,K_COLUMNS);
+    for(i = 0; i < npes; i++){ 
+      for(j=0;j<P_ROWS;j++) {
+        for(k=0;k<K_COLUMNS;k++) {
+          A[i*P_ROWS*K_COLUMNS+j*K_COLUMNS+k] = (float)P_ROWS*i+j;
+          printf("%.3f ",A[i*P_ROWS*K_COLUMNS+j*K_COLUMNS+k]);
+        }
+        printf("\n");
+      }
+    printf("--------------------\n");
+    }
+    for(k=0;k<N;k++) printf("%.3f ",A[k]);
+      printf("\n");
+  }
+
+/* Scatter the rows to npes processes */
+  int num_el = N/npes;
+  float * A_local = (float *) malloc(num_el*sizeof(float));
+  MPI_Scatter(A, num_el, MPI_FLOAT, A_local, num_el, MPI_FLOAT, //Ask question about sending both rows
+		     0, MPI_COMM_WORLD);
+
+  
+/* you may want to check here whether MPI_Scatter was correct */
+  //Each PE should have P_ROWS rows, which have K_COLUMNS elements ( P_ROWS*K_COLUMNS elems per PE)
+  printf("Scatter Check\n");
+  for(int i = 0; i < P_ROWS; i++){
+    for(int j = 0; j < K_COLUMNS; j++){
+      printf("%.3f ", A_local[i*K_COLUMNS + j]);
+    }
+    printf("\n");
+  }
+ 
+/* buffers for send and receive rows */
+  // float *l_buf_l = (float *)calloc(K_COLUMNS, sizeof(float));
+  // float *l_buf_r = (float *)calloc(K_COLUMNS, sizeof(float));
+  // float *r_buf_l = (float *)calloc(K_COLUMNS, sizeof(float));
+  // float *r_buf_r = (float *)calloc(K_COLUMNS, sizeof(float));
+
+  float *l_buf_s = (float *)calloc(K_COLUMNS, sizeof(float));
+  float *l_buf_r = (float *)calloc(K_COLUMNS, sizeof(float));
+  float *r_buf_s = (float *)calloc(K_COLUMNS, sizeof(float));
+  float *r_buf_r = (float *)calloc(K_COLUMNS, sizeof(float));
+
+/* Create the row_type for exchanging rows among PEs */
+/* The length of a row is K_COLUMNS                  */
+  MPI_Type_contiguous(K_COLUMNS, MPI_FLOAT, &row_type);
+  MPI_Type_commit(&row_type);
+  MPI_Type_size(row_type,&row_size);
+
+/* starting addresses for second last and last  row in A_local * //
+ * these locations will be updated (swapped)                   */
+  int second_last = K_COLUMNS*(P_ROWS-2);
+  //int second = K_COLUMNS;
+  int last_row = K_COLUMNS*(P_ROWS-1);
+
+  //row numbers for A_local rows (will change)
+  //Each PE will get two rows in the initial scatter
+  int first = rank * P_ROWS;
+  int second = rank * P_ROWS + 1;
+  //printf("Rank: %d\n",rank);
+  
+
+  //threshold, error, iter, MAX_ITER not defined
+
+/* iterate until termination criteria are not met      */ //Threshold is norm of matrix * # of elemens * Precision of float or double see Ed
+//while((threshold < error)&&(iter < MAX_ITER)) {
+
+  /* perform full sweep                                   */ //Any pair of rows is orthogonal(product is 0), that is equivalent to knowing A * A^T being diagonal
+                                                            //Solve for cp and sp matrix, page 2 and 3(use quadratic)
+  for (k=0;k<2*npes-1;k++)  {
+                                                              //Swap rows with the communication ring
+                                                              //Final A is already computed as the sigma * UT, 
+    /* orthogonalize consecutive (odd,even) rows            */ //Helper Function?
+    //Rotation
+    givens_rotate(A_local);
+    //Update A (Gather rows from other PEs to main)
+    // for(int i = 0; i < K_COLUMNS; i++){
+    //   //printf("Local okay for rank %d: %.3f\n",rank, A_local[i]);
+    //   A[first*K_COLUMNS + i] = A_local[i];
+    //   A[second*K_COLUMNS + i] = A_local[K_COLUMNS+i];
+    // }
+    //printf("Done with A update\n");
+    if ((rank>0)&&(rank<npes-1)){
+      //Deposit A_local into buffers to be sent
+      for(int i = 0; i < K_COLUMNS; i++){
+        l_buf_s[i] = A_local[i];
+        r_buf_s[i] = A_local[K_COLUMNS+i];
+      }
+      
+      //send left buffer to the right
+      MPI_Send(l_buf_s, K_COLUMNS, MPI_FLOAT, rank+1, 0, MPI_COMM_WORLD);
+      //receive from left for left buffer
+      MPI_Recv(l_buf_r, K_COLUMNS, MPI_FLOAT, rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      //send right buffer to the left
+      MPI_Send(r_buf_s, K_COLUMNS, MPI_FLOAT, rank-1, 0, MPI_COMM_WORLD);
+      //receive from right for right buffer
+      MPI_Recv(r_buf_r, K_COLUMNS, MPI_FLOAT, rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); 
+      
+      //Deposit receive buffers into A_local
+      for(int i = 0; i < K_COLUMNS; i++){
+        A_local[i] = l_buf_r[i];
+        A_local[K_COLUMNS+i] = r_buf_r[i];
+      }
+      //Update first row logic for A update
+      if(first == 2){
+        first = 1;
+      }
+      else if(first%2==0){
+        first -= 2;
+      }
+      else if(first == npes*2 -1){
+        first = npes*2 -2;
+      }
+      else if(first%2==1){
+        first += 2;
+      }
+      //Update second row logic for A update
+      if(second == 2){
+        second = 1;
+      }
+      else if(second%2==0){
+        second -= 2;
+      }
+      else if(second == npes*2 -1){
+        second = npes*2 -2;
+      }
+      else if(second%2==1){
+        second += 2;
+      }
+    }
+
+    if (rank==0){
+      //First row is always the same - always row 0
+      for(int i = 0; i < K_COLUMNS; i++){
+        r_buf_s[i] = A_local[K_COLUMNS+i];
+      }
+      //send right to the right
+      MPI_Send(r_buf_s, K_COLUMNS, MPI_FLOAT, rank+1, 0, MPI_COMM_WORLD);
+      //receive from right 
+      MPI_Recv(r_buf_r, K_COLUMNS, MPI_FLOAT, rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); 
+
+      for(int i = 0; i < K_COLUMNS; i++){
+        A_local[K_COLUMNS+i] = r_buf_r[i];
+      }
+      //First is always 0
+      first = 0;
+      //Update second row logic for A update
+      if(second == 2){
+        second = 1;
+      }
+      else if(second%2==0){
+        second -= 2;
+      }
+      else if(second == npes*2 -1){
+        second = npes*2 -2;
+      }
+      else if(second%2==1){
+        second += 2;
+      }
+    }
+
+    if (rank == npes-1){
+      for(int i = 0; i < K_COLUMNS; i++){
+        l_buf_s[i] = A_local[i]; //Moves to right, held here as a temp
+        r_buf_s[i] = A_local[K_COLUMNS+i];
+      }
+      // receive from left
+      MPI_Recv(l_buf_r, K_COLUMNS, MPI_FLOAT, rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); 
+      //send right buffer to the left
+      MPI_Send(r_buf_s, K_COLUMNS, MPI_FLOAT, rank-1, 0, MPI_COMM_WORLD);
+      for(int i = 0; i < K_COLUMNS; i++){
+        A_local[i] = l_buf_r[i];
+        A_local[K_COLUMNS+i] = l_buf_s[i];
+      }
+      //Update first row logic for A update
+      if(first == 2){
+        first = 1;
+      }
+      else if(first%2==0){
+        first -= 2;
+      }
+      else if(first == npes*2 -1){
+        first = npes*2 -2;
+      }
+      else if(first%2==1){
+        first += 2;
+      }
+      //Update second row logic for A update
+      if(second == 2){
+        second = 1;
+      }
+      else if(second%2==0){
+        second -= 2;
+      }
+      else if(second == npes*2 -1){
+        second = npes*2 -2;
+      }
+      else if(second%2==1){
+        second += 2;
+      }
+    }
+
+  } /* end the k loop */
+
+  if(rank == 0){
+    for(int i = 0; i < 2*npes-1; i++){
+      for(int j = 0; j < K_COLUMNS; j++){
+        printf("%.3f ", A[i*K_COLUMNS +j]);
+      }
+      printf("\n");
+    }
+  }
+
+/* check termination criteria */
+//} /* end wwhile loop          */
+
+  free((void *) A_local);
+   
+  if(rank == 0)  free((void *)A);
+
+  MPI_Finalize();
+  return 0;
+}
+
 
