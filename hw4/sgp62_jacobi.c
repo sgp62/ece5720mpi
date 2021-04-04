@@ -28,7 +28,7 @@
 #include <math.h>
 
 #define P_ROWS    2       /* number of rows per PE                     */ // M = P_ROWS * npes
-#define K_COLUMNS 16       /* number of columns                         */
+#define K_COLUMNS 4       /* number of columns                         */
 #define MAX_SWEEPS        1024        
 
 void dummy(double *A){
@@ -97,6 +97,7 @@ int main(int argc, char ** argv) {
   int rank, npes, right, left, row_size, recvd_count;
   int rc, i, j, k, N;
   double * A;
+  double * AT;
   double start_time, end_time;
   
   FILE *tp = NULL;            
@@ -114,15 +115,9 @@ int main(int argc, char ** argv) {
 
   N = P_ROWS*K_COLUMNS*npes;
 
-/* the master generates matrix A
- * in this example rows of are
- * [0 0 ...0] for row 0
- * [1 1 ...1] for row 1, etc.
- * this done to check whether permutations are correct
- * needs to be removed when correctness is checked      */
-
   if(rank == 0) {
     A = (double *) malloc(N*sizeof(double));
+    AT = (double *) malloc(N*sizeof(double));
     //printf("there are %d PEs\n",npes);
     //printf("size of A is %d by %d\n",npes*P_ROWS,K_COLUMNS);
     for(i = 0; i < npes; i++){ 
@@ -157,11 +152,6 @@ int main(int argc, char ** argv) {
   // }
  
 /* buffers for send and receive rows */
-  // double *l_buf_l = (double *)calloc(K_COLUMNS, sizeof(double));
-  // double *l_buf_r = (double *)calloc(K_COLUMNS, sizeof(double));
-  // double *r_buf_l = (double *)calloc(K_COLUMNS, sizeof(double));
-  // double *r_buf_r = (double *)calloc(K_COLUMNS, sizeof(double));
-
   double *l_buf_s = (double *)calloc(K_COLUMNS, sizeof(double));
   double *l_buf_r = (double *)calloc(K_COLUMNS, sizeof(double));
   double *r_buf_s = (double *)calloc(K_COLUMNS, sizeof(double));
@@ -191,17 +181,16 @@ int main(int argc, char ** argv) {
 /* iterate until termination criteria are not met      */ //Threshold is norm of matrix * # of elemens * Precision of double or double see Ed
   double threshold, error;
   int iter = 0;
-  //while((threshold < error)&&(iter < MAX_ITER)) {
   if(rank == 0){
     start_time = MPI_Wtime();
   }
-  while(iter < MAX_SWEEPS){
+  while((threshold < error) && iter < MAX_SWEEPS){
     iter++;
     for (k=0;k<2*npes-1;k++)  {
       /* orthogonalize consecutive (odd,even) rows            */ //Helper Function?
       //Rotation
       //dummy(A_local);
-      givens_rotate(A_local);
+      //givens_rotate(A_local);
       //Update A (Gather rows from other PEs to main)
       // for(int i = 0; i < K_COLUMNS; i++){
       //   //printf("Local okay for rank %d: %.3f\n",rank, A_local[i]);
@@ -337,14 +326,28 @@ int main(int argc, char ** argv) {
     
 
     } /* end the k loop */
+    if(iter > 8){
+      MPI_Gather(A_local, P_ROWS*K_COLUMNS, MPI_DOUBLE, A, P_ROWS*K_COLUMNS, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      //Error checking
+      //Create Transpose of A
+      for(int i = 0; i < P_ROWS*npes; i++){
+        for(int j = 0; j < K_COLUMNS; j++){
+          AT[j*K_COLUMNS+i] = A[i*K_COLUMNS+j];
+        }
+      }
+      
+    }
+
 
   }/* end wwhile loop          */
-  if(rank == 0){
-    end_time = MPI_Wtime();
-    fprintf(tp,"%d, ",K_COLUMNS);
-    fprintf(tp,"%d, ",npes);
-    fprintf(tp,"%1.3e, ",end_time-start_time);
-  }
+
+
+  // if(rank == 0){
+  //   end_time = MPI_Wtime();
+  //   fprintf(tp,"%d, ",K_COLUMNS);
+  //   fprintf(tp,"%d, ",npes);
+  //   fprintf(tp,"%1.3e, ",end_time-start_time);
+  // }
 
 
   // printf("A_local for rank %d: ", rank);
@@ -355,14 +358,14 @@ int main(int argc, char ** argv) {
   //   printf("\n");
   // }
 
-  // if(rank == 0){
-  //   for(int i = 0; i < 2*npes-1; i++){
-  //     for(int j = 0; j < K_COLUMNS; j++){
-  //       printf("%.3f ", A[i*K_COLUMNS +j]);
-  //     }
-  //     printf("\n");
-  //   }
-  // }
+  if(rank == 0){
+    for(int i = 0; i < 2*npes; i++){
+      for(int j = 0; j < K_COLUMNS; j++){
+        printf("%.3f ", A[i*K_COLUMNS +j]);
+      }
+      printf("\n");
+    }
+  }
 
 /* check termination criteria */
 //} 

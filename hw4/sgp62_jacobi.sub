@@ -3,8 +3,8 @@
 #SBATCH -o output/sgp62_jacobi.o%j # stdout output file(%j expands to jobId)
 #SBATCH -e output/sgp62_jacobi.e%j # stderr output file(%j expands to jobId)
 #SBATCH --nodes=4 # number of nodes requested
-#SBATCH --ntasks=64 # number of tasks to be configured for.
-#SBATCH --tasks-per-node=16 # number of tasks to run on each node.
+#SBATCH --ntasks=8 # number of tasks to be configured for.
+#SBATCH --tasks-per-node=2 # number of tasks to run on each node.
 #SBATCH --cpus-per-task=1 # number of cpus needed by each task
 #SBATCH --get-user-env # retrieve the users login environment.
 #SBATCH -t 00:10:00 # Run time (hh:mm:ss)
