@@ -89,9 +89,6 @@ int main (int argc, char *argv[])
     src = dest =  my_rank - n_tasks/2;
   }
   MPI_Gather(&dest, 1, MPI_INT, &taskpairs, 1, MPI_INT, 0, MPI_COMM_WORLD); //OH
-  //mpicc ...c
-  //!mpir
-
 
 /* Report the set-up */
   if (my_rank == 0) {
