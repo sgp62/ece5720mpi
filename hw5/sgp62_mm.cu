@@ -5,8 +5,8 @@
 /* and grid is N/BLOCK_SIZE by BLOCK_SIZE                       */
 
 #include <stdio.h>
-#define BLOCK_SIZE 64 //Invariant: Tile size is always equal to block size
-#define N 16384
+#define BLOCK_SIZE 128 //Invariant: Tile size is always equal to block size
+#define N 8192
 
 __global__ void matrixMul(float *dev_A, float * dev_B, float * dev_C, int n)
 {

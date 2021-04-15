@@ -1,8 +1,13 @@
 clock:  2.581e+00, event:  2.581e+00, CPU:  2.769e+00, Unified
+clock:  2.247e+00, event:  2.247e+00, CPU:  2.321e+00, 256
 
 clock:  2.826e+00, event:  2.826e-03, CPU:  2.947e+00, Pageable
+clock:  2.911e+00, event:  2.911e-03, CPU:  2.997e+00, 256
 
 clock:  2.711e+00, event:  2.710e+00, CPU:  2.834e+00, Pinned
+clock:  2.649e+00, event:  2.648e+00, CPU:  2.729e+00, 256
 
 clock:  2.801e+00, event:  2.800e+00, CPU:  2.913e+00, Mapped
+clock:  2.258e+00, event:  2.257e+00, CPU:  2.341e+00, 256
+
 

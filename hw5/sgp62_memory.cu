@@ -56,8 +56,9 @@ int main() {
 
     // start timing CUDA events from this marker point    
     cudaEventRecord(cstart,0);
-/*
+
 //************* pinned memory **********
+/*
 // host
   int *h_a1, *h_b1, *h_c1;
   cudaMallocHost((int **)&h_a1, size_int);
@@ -74,10 +75,11 @@ int main() {
   cudaMalloc((int **)&d_c1, size_int);
   cudaMemcpy(d_a1, h_a1, size_int, cudaMemcpyHostToDevice);
   cudaMemcpy(d_b1, h_b1, size_int, cudaMemcpyHostToDevice);
-*/
 
+*/
 //*************** Mapped memory (zero-copy memory) ************
 // host
+/*
   int *h_a2, *h_b2, *h_c2;
   cudaHostAlloc((int **)&h_a2, size_int, cudaHostAllocMapped);
   cudaHostAlloc((int **)&h_b2, size_int, cudaHostAllocMapped);
@@ -92,7 +94,7 @@ int main() {
   cudaHostGetDevicePointer((int **)&d_a2, (int *)h_a2, 0);
   cudaHostGetDevicePointer((int **)&d_b2, (int *)h_b2, 0);
   cudaHostGetDevicePointer((int **)&d_c2, (int *)h_c2, 0);
-
+*/
 
 
 //************** Unified memory **************************
@@ -108,7 +110,7 @@ int main() {
 //  memset(c, 0, size);
 
 
-/*
+
  //Host pagable memory allocation
     int *h_a, *h_b, *h_c;
     h_a = (int *)malloc(size_int); 
@@ -130,17 +132,17 @@ int main() {
 //Host to device input data transfer
     cudaMemcpy(d_a, h_a, size_int, cudaMemcpyHostToDevice);
     cudaMemcpy(d_b, h_b, size_int, cudaMemcpyHostToDevice);
-*/
+
 //Kernel launch
     dim3 block(block_size);
     dim3 grid(size/block.x);
-    vec_add <<< grid, block >>> (h_a2, h_b2, h_c2, size); //Change for memory management type
+    vec_add <<< grid, block >>> (h_a, h_b, h_c, size); //Change for memory management type
  
 // CPU waits until device is done
     cudaDeviceSynchronize();
 
 //Device to host output data transfer
-    //cudaMemcpy(h_c2, d_c2, size_int, cudaMemcpyDeviceToHost); //INCLUDE for all except unified
+    cudaMemcpy(h_c2, d_c2, size_int, cudaMemcpyDeviceToHost); //INCLUDE for all except unified
 
     cudaEventRecord(cstop,0);
     cudaEventSynchronize(cstop);
@@ -176,13 +178,13 @@ int main() {
 	  fclose(tp);
     
     
-    // free(h_a); free(h_b); free(h_c); //Pageable
-    // cudaFree(d_a); cudaFree(d_b); cudaFree(d_c); //Pageable
-    //cudaFreeHost(h_a1); cudaFreeHost(h_b1); cudaFreeHost(h_c1); //Pinned
-    //cudaFree(d_a1); cudaFree(d_b1); cudaFree(d_c1); //Pinned
-    cudaFreeHost(h_a2); cudaFreeHost(h_b2); cudaFreeHost(h_c2); //Mapped
-    cudaFree(d_a2); cudaFree(d_b2); cudaFree(d_c2); //Mapped
-    //cudaFree(a); cudaFree(b); cudaFree(c); //Unified
+    free(h_a); free(h_b); free(h_c); //Pageable
+    cudaFree(d_a); cudaFree(d_b); cudaFree(d_c); //Pageable
+    // cudaFreeHost(h_a1); cudaFreeHost(h_b1); cudaFreeHost(h_c1); //Pinned
+    // cudaFree(d_a1); cudaFree(d_b1); cudaFree(d_c1); //Pinned
+    // cudaFreeHost(h_a2); cudaFreeHost(h_b2); cudaFreeHost(h_c2); //Mapped
+    // cudaFree(d_a2); cudaFree(d_b2); cudaFree(d_c2); //Mapped
+    // cudaFree(a); cudaFree(b); cudaFree(c); //Unified
     
 
     return 0;
