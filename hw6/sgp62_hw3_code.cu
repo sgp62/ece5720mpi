@@ -38,8 +38,9 @@ int main(int argc, char*argv[])
   
     m = n = 32; 
 
-    double * x = malloc(m*sizeof(double));
+    double * x = malloc(n*sizeof(double));
     double * mat = malloc(m*n*sizeof(double));
+    double * b = malloc(n*sizeof(double));
 
     for(i = 0; i < m; i++){//Fill A
       for(j = 0; j < n; j++){
@@ -49,18 +50,19 @@ int main(int argc, char*argv[])
     //printf("%.16lf, %.16lf\n",mat[0], mat[m*n - 1]);
     fclose(file);
 
-    for(i = 0; i < m; i++){ //Fill x
+    for(i = 0; i < n; i++){ //Fill x
         x[i] = 1.0;
     }
 
 /*********************************************************************
 /*   (3) move A and x to the device
 ********************************************************************/
-   cudaMalloc ((void**)&d_A , sizeof(*A)*m*n);
-   cudaMalloc ((void**)&d_x ,n*sizeof(*x));
+    void *d_A, d_x;
+    cudaMalloc ((void**)&d_A , sizeof(*A)*m*n);
+    cudaMalloc ((void**)&d_x ,n*sizeof(*x));
 
-   stat = cublasSetMatrix (m,n, sizeof (*A), A, m, d_A ,m);
-   stat = cublasSetVector (n, sizeof (*zx ,x ,1 ,d_x ,1);
+    stat = cublasSetMatrix (m,n, sizeof (*A), A, m, d_A ,m);
+    stat = cublasSetVector (n, sizeof (*x) ,x ,1 ,d_x ,1);
 
 /*********************************************************************
 /*   (4) on the device call cublasDgemv to get b = A*x
@@ -86,8 +88,9 @@ incy   - input stride between consecutive elements of y.
 
 
 *********************************************************************************/
-   cudaMalloc (( void **)& d_b ,n* sizeof(*b));
-   cublasDgemv(.....);
+    void *d_b;
+    cudaMalloc (( void **)&d_b ,n* sizeof(*b));
+    cublasDgemv(cublasH);
    
 /*********************************************************************
 /*   (5) on the device call cusolverDnDgesvd to get A = U*S*V^T
