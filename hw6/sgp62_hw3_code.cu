@@ -25,6 +25,12 @@ int main(int argc, char*argv[])
     cublasStatus_t cublas_status = CUBLAS_STATUS_SUCCESS;
     cusolverStatus_t cusolver_status = CUSOLVER_STATUS_SUCCESS;
 
+    cusolver_status = cusolverDnCreate(&cusolverH);
+    assert(CUSOLVER_STATUS_SUCCESS == cusolver_status);
+
+    cublas_status = cublasCreate(&cublasH);
+    assert(CUBLAS_STATUS_SUCCESS == cublas_status);
+
 /* (1)&(2) read A from mymatrix.txt, set x to all ones*****************
    A is 32 by 32, so set m = n = 32
    make A a 1D vector
@@ -39,12 +45,12 @@ int main(int argc, char*argv[])
     m = n = 32; 
 
     double * x = malloc(n*sizeof(double));
-    double * mat = malloc(m*n*sizeof(double));
+    double * A = malloc(m*n*sizeof(double));
     double * b = malloc(n*sizeof(double));
 
     for(i = 0; i < m; i++){//Fill A
       for(j = 0; j < n; j++){
-        if(!fscanf(file, "%lf", &mat[i*n+j])) break;
+        if(!fscanf(file, "%lf", &A[i*n+j])) break;
       }
     }
     //printf("%.16lf, %.16lf\n",mat[0], mat[m*n - 1]);
@@ -89,8 +95,8 @@ incy   - input stride between consecutive elements of y.
 
 *********************************************************************************/
     void *d_b;
-    cudaMalloc (( void **)&d_b ,n* sizeof(*b));
-    cublasDgemv(cublasH);
+    cudaMalloc (( void **) &d_b ,n* sizeof(*b));
+    cublasDgemv(cublasH, CUBLAS_OP_N, m, n, 1, d_A, m, d_x, 1, 0, d_b, 1); //Creating b = Ax  ( b = 1*A*x + 0*b )
    
 /*********************************************************************
 /*   (5) on the device call cusolverDnDgesvd to get A = U*S*V^T
@@ -114,6 +120,28 @@ lwork     - size of working space returned by gesvd_bufferSize
 d_rwork   - real array, contains the unconverged superdiagonal elements 
 devInfo   - if devInfo = 0, the operation is successful.
 *********************************************************************************/
+
+    double * U = malloc(m*m*sizeof(double));
+    double * VT = malloc(n*n*sizeof(double));
+    double * S = malloc(n*sizeof(double));
+
+    double *d_S;
+    double *d_U;
+    double *d_VT;
+    int *devInfo = NULL;
+    double *d_work = NULL;
+    double *d_rwork = NULL;
+    double *d_W = NULL;  // W = S*VT
+
+    cudaMalloc (( void **) &d_S ,n* sizeof(*S));
+    cudaMalloc (( void **) &d_U ,m*m* sizeof(*U));
+    cudaMalloc (( void **) &d_VT ,n*n* sizeof(*b));
+    cudaMalloc (( void **) &devInfo ,sizeof(int));
+    cudaMalloc (( void **) &d_W ,m*n* sizeof(double));
+    cusolverDnDgesvd(cusolverH, 'A', 'A', m, n, d_A, m, *S, *U, ldu, *VT, ldvt, *work,
+        lwork, *rwork, *devInfo);
+
+/************************************************************************/
 //  (6)  Form U_k, V_k, S_k
 //       U_k is 32 by 16, same with V_k, however remember that 
 //       cusolverDnDgesvd returns V^T, not V
