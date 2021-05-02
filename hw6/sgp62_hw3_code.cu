@@ -25,6 +25,8 @@ int main(int argc, char*argv[])
     cublasStatus_t cublas_status = CUBLAS_STATUS_SUCCESS;
     cusolverStatus_t cusolver_status = CUSOLVER_STATUS_SUCCESS;
 
+    cudaError_t cudaStat1 = cudaSuccess;
+
     cusolver_status = cusolverDnCreate(&cusolverH);
     assert(CUSOLVER_STATUS_SUCCESS == cusolver_status);
 
@@ -125,6 +127,8 @@ devInfo   - if devInfo = 0, the operation is successful.
     double * VT = malloc(n*n*sizeof(double));
     double * S = malloc(n*sizeof(double));
 
+    int lwork = 0;
+
     double *d_S;
     double *d_U;
     double *d_VT;
@@ -138,15 +142,33 @@ devInfo   - if devInfo = 0, the operation is successful.
     cudaMalloc (( void **) &d_VT ,n*n* sizeof(*b));
     cudaMalloc (( void **) &devInfo ,sizeof(int));
     cudaMalloc (( void **) &d_W ,m*n* sizeof(double));
-    cusolverDnDgesvd(cusolverH, 'A', 'A', m, n, d_A, m, *S, *U, ldu, *VT, ldvt, *work,
-        lwork, *rwork, *devInfo);
+
+    //Get working space of SVD
+    cusolver_status = cusolverDnDgesvd_bufferSize(cusolverH, m, n, &lwork );
+    assert(cusolver_status == CUSOLVER_STATUS_SUCCESS);
+
+    cusolverDnDgesvd(cusolverH, 'A', 'A', m, n, d_A, m, d_S, d_U, ldu, d_VT, m, d_work,
+        lwork, d_rwork, devInfo);
+
+    cudaStat1 = cudaDeviceSynchronize();
+    assert(cudaSuccess == cudaStat1);
 
 /************************************************************************/
 //  (6)  Form U_k, V_k, S_k
 //       U_k is 32 by 16, same with V_k, however remember that 
 //       cusolverDnDgesvd returns V^T, not V
 //       S_k is a vector of length 16 of the largest singular values of A     
-/*********************************************************************
+/*********************************************************************/
+    double *d_Sk;
+    double *d_Uk;
+    double *d_Vk;
+    cudaMalloc (( void **) &d_Sk ,(n/2)* sizeof(*S));
+    cudaMalloc (( void **) &d_Uk ,m*(m/2)* sizeof(*U));
+    cudaMalloc (( void **) &d_Vk ,n*(n/2)* sizeof(*b));
+
+    
+
+/*************************************************************
   (7)  Find x_k
        (a) use cublasDgemv to get b_k = U_k^Tb 
        (b) find a length 16 vector t with entries being inverses of
