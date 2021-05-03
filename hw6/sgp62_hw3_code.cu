@@ -18,6 +18,15 @@
   (10) Move x_k and eta_k to the host.
 */
 
+__global__ void create_k_matrix(double * dev_M, double * dev_K, int n){
+
+    int i = threadIdx.y; //Row i of M
+    int j = threadIdx.x; //Column j of M
+
+    dev_K[i*n + j] = dev_M[i*n+j]; //Only should copy first 16 rows out of 32
+}
+
+
 int main(int argc, char*argv[])
 {
     cusolverDnHandle_t cusolverH = NULL;
@@ -159,14 +168,24 @@ devInfo   - if devInfo = 0, the operation is successful.
 //       cusolverDnDgesvd returns V^T, not V
 //       S_k is a vector of length 16 of the largest singular values of A     
 /*********************************************************************/
+    double *d_V;
     double *d_Sk;
     double *d_Uk;
     double *d_Vk;
+    cudaMalloc (( void **) &d_V ,n*n* sizeof(*d_VT));
     cudaMalloc (( void **) &d_Sk ,(n/2)* sizeof(*S));
     cudaMalloc (( void **) &d_Uk ,m*(m/2)* sizeof(*U));
     cudaMalloc (( void **) &d_Vk ,n*(n/2)* sizeof(*b));
 
-    
+    cublasDgeam(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, m, n, 1, d_Vt, m, 0, d_VT, m, d_V, m); //Transposes VT and places in V on device
+
+    //Launch kernels to copy V, S, U values into Vk, Sk, Uk on device
+    int numBlocks = 1;
+    dim3 threadsPerBlock(32, 16);
+    dim3 threadsPerBlockS(1, 16);
+    create_k_matrix<<<numBlocks,threadsPerBlock>>>(d_V, d_Vk, 32); //32 cols, 16 rows
+    create_k_matrix<<<numBlocks,threadsPerBlock>>>(d_U, d_Uk, 32); //32 cols, 16 rows
+    create_k_matrix<<<numBlocks,threadsPerBlockS>>>(d_S, d_Sk, 1); //1 col, 16 rows
 
 /*************************************************************
   (7)  Find x_k
@@ -194,6 +213,15 @@ ldc      - Leading dimension of C, ldc = lda = m
        (d) x_k = V_k*r, use cublasDgemv
 
 *********************************************************************************/
+
+    void *d_bk;
+    cudaMalloc (( void **) &d_Sk ,(n/2)* sizeof(*b));
+    
+    cublasDgemv(cublasH, CUBLAS_OP_T, m/2, n, 1, d_Uk, m/2, d_b, 1, 0, d_bk, 1); //Forming d_bk
+
+    
+
+
 
 
 
