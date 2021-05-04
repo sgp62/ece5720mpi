@@ -18,6 +18,14 @@
   (10) Move x_k and eta_k to the host.
 */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
+#include <cusolverDn.h>
+
 __global__ void create_k_matrix(double * dev_M, double * dev_K, int n){
 
     int i = threadIdx.y; //Row i of M
@@ -26,6 +34,11 @@ __global__ void create_k_matrix(double * dev_M, double * dev_K, int n){
     dev_K[i*n + j] = dev_M[i*n+j]; //Only should copy first 16 rows out of 32
 }
 
+__global__ void create_S_inv(double * dev_S, double * dev_Si){
+
+    int i = threadIdx.x;
+    dev_Si[i] = 1 / dev_S[i];
+}
 
 int main(int argc, char*argv[])
 {
@@ -55,9 +68,12 @@ int main(int argc, char*argv[])
   
     m = n = 32; 
 
-    double * x = malloc(n*sizeof(double));
-    double * A = malloc(m*n*sizeof(double));
-    double * b = malloc(n*sizeof(double));
+    double alpha = 1.0;
+    double beta = 0.0;
+
+    double * x = (double *)malloc(n*sizeof(double));
+    double * A = (double *)malloc(m*n*sizeof(double));
+    double * b = (double *)malloc(n*sizeof(double));
 
     for(i = 0; i < m; i++){//Fill A
       for(j = 0; j < n; j++){
@@ -74,12 +90,13 @@ int main(int argc, char*argv[])
 /*********************************************************************
 /*   (3) move A and x to the device
 ********************************************************************/
-    void *d_A, d_x;
+    double *d_A;
+    double *d_x;
     cudaMalloc ((void**)&d_A , sizeof(*A)*m*n);
     cudaMalloc ((void**)&d_x ,n*sizeof(*x));
 
-    stat = cublasSetMatrix (m,n, sizeof (*A), A, m, d_A ,m);
-    stat = cublasSetVector (n, sizeof (*x) ,x ,1 ,d_x ,1);
+    cublasSetMatrix (m,n, sizeof (*A), A, m, d_A ,m);
+    cublasSetVector (n, sizeof (*x) ,x ,1 ,d_x ,1);
 
 /*********************************************************************
 /*   (4) on the device call cublasDgemv to get b = A*x
@@ -105,9 +122,9 @@ incy   - input stride between consecutive elements of y.
 
 
 *********************************************************************************/
-    void *d_b;
+    double *d_b;
     cudaMalloc (( void **) &d_b ,n* sizeof(*b));
-    cublasDgemv(cublasH, CUBLAS_OP_N, m, n, 1, d_A, m, d_x, 1, 0, d_b, 1); //Creating b = Ax  ( b = 1*A*x + 0*b )
+    cublasDgemv(cublasH, CUBLAS_OP_N, m, n, &alpha, d_A, m, d_x, 1, &beta, d_b, 1); //Creating b = Ax  ( b = 1*A*x + 0*b )
    
 /*********************************************************************
 /*   (5) on the device call cusolverDnDgesvd to get A = U*S*V^T
@@ -132,9 +149,9 @@ d_rwork   - real array, contains the unconverged superdiagonal elements
 devInfo   - if devInfo = 0, the operation is successful.
 *********************************************************************************/
 
-    double * U = malloc(m*m*sizeof(double));
-    double * VT = malloc(n*n*sizeof(double));
-    double * S = malloc(n*sizeof(double));
+    double * U = (double *)malloc(m*m*sizeof(double));
+    double * VT = (double *)malloc(n*n*sizeof(double));
+    double * S = (double *)malloc(n*sizeof(double));
 
     int lwork = 0;
 
@@ -156,10 +173,14 @@ devInfo   - if devInfo = 0, the operation is successful.
     cusolver_status = cusolverDnDgesvd_bufferSize(cusolverH, m, n, &lwork );
     assert(cusolver_status == CUSOLVER_STATUS_SUCCESS);
 
-    cusolverDnDgesvd(cusolverH, 'A', 'A', m, n, d_A, m, d_S, d_U, ldu, d_VT, m, d_work,
+    cudaStat1 = cudaMalloc((void**)&d_work , sizeof(double)*lwork);
+    assert(cudaSuccess == cudaStat1);
+
+    cusolver_status = cusolverDnDgesvd(cusolverH, 'A', 'A', m, n, d_A, m, d_S, d_U, m, d_VT, m, d_work,
         lwork, d_rwork, devInfo);
 
     cudaStat1 = cudaDeviceSynchronize();
+    assert(CUSOLVER_STATUS_SUCCESS == cusolver_status);
     assert(cudaSuccess == cudaStat1);
 
 /************************************************************************/
@@ -177,7 +198,7 @@ devInfo   - if devInfo = 0, the operation is successful.
     cudaMalloc (( void **) &d_Uk ,m*(m/2)* sizeof(*U));
     cudaMalloc (( void **) &d_Vk ,n*(n/2)* sizeof(*b));
 
-    cublasDgeam(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, m, n, 1, d_Vt, m, 0, d_VT, m, d_V, m); //Transposes VT and places in V on device
+    cublasDgeam(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, m, n, &alpha, d_VT, m, &beta, d_VT, m, d_V, m); //Transposes VT and places in V on device
 
     //Launch kernels to copy V, S, U values into Vk, Sk, Uk on device
     int numBlocks = 1;
@@ -214,15 +235,24 @@ ldc      - Leading dimension of C, ldc = lda = m
 
 *********************************************************************************/
 
-    void *d_bk;
-    cudaMalloc (( void **) &d_Sk ,(n/2)* sizeof(*b));
+    double *d_bk;
+    cudaMalloc (( void **) &d_bk ,(n/2)* sizeof(*b));
     
-    cublasDgemv(cublasH, CUBLAS_OP_T, m/2, n, 1, d_Uk, m/2, d_b, 1, 0, d_bk, 1); //Forming d_bk
+    cublasDgemv(cublasH, CUBLAS_OP_T, m/2, n, &alpha, d_Uk, m/2, d_b, 1, &beta, d_bk, 1); //Forming d_bk
 
-    
+    double *d_Si;
+    cudaMalloc (( void **) &d_Si ,(n/2)* sizeof(*S)); //Forming d_Si, inverse of d_Sk
 
+    create_S_inv<<<1,16>>>(d_Sk, d_Si);
 
+    double *d_r;
+    cudaMalloc (( void **) &d_r ,(n/2)* sizeof(*b));
 
+    cublasDdgmm(cublasH, CUBLAS_SIDE_LEFT, 16, 1, d_bk, 16, d_Si, 1, d_r, 16); //Creating d_r = diag(d_Si)*d_bk
+
+    double *d_xk;
+    cudaMalloc (( void **) &d_xk ,(n/2)* sizeof(*x));
+    cublasDgemv(cublasH, CUBLAS_OP_N, m/2, n, &alpha, d_Vk, m/2, d_r, 1, &beta, d_xk, 1); //Forming d_xk
 
 
 /*********************************************************************
