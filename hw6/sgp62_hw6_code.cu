@@ -1,4 +1,6 @@
-/*
+/*Stefen Pegels, sgp62
+ /usr/local/cuda-10.1/bin/nvcc -o sgp62_hw6.out sgp62_hw6_code.cu -lcublas -lcusolver
+ ./sgp62_hw6.out
  Steps to be implemented
 
   (1)  load data matrix A to the host.
