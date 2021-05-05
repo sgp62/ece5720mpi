@@ -31,13 +31,18 @@ __global__ void create_k_matrix(double * dev_M, double * dev_K, int n){
     int i = threadIdx.y; //Row i of M
     int j = threadIdx.x; //Column j of M
 
-    dev_K[i*n + j] = dev_M[i*n+j]; //Only should copy first 16 rows out of 32
+    dev_K[i*n + j] = dev_M[i*n+j]; //should create 32 x 16 
 }
 
 __global__ void create_S_inv(double * dev_S, double * dev_Si){
 
     int i = threadIdx.x;
     dev_Si[i] = 1 / dev_S[i];
+}
+
+__global__ void subtract(double *x, double *x_k, double * x_e){
+    int i = threadIdx.x;
+    x_e[i] = x_k[i] - x[i];
 }
 
 int main(int argc, char*argv[])
@@ -54,6 +59,8 @@ int main(int argc, char*argv[])
 
     cublas_status = cublasCreate(&cublasH);
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
+
+    //cublasSetPointerMode(cublasH, CUBLAS_POINTER_MODE_DEVICE);
 
 /* (1)&(2) read A from mymatrix.txt, set x to all ones*****************
    A is 32 by 32, so set m = n = 32
@@ -92,8 +99,8 @@ int main(int argc, char*argv[])
 ********************************************************************/
     double *d_A;
     double *d_x;
-    cudaMalloc ((void**)&d_A , sizeof(*A)*m*n);
-    cudaMalloc ((void**)&d_x ,n*sizeof(*x));
+    cudaMalloc (( void **)&d_A , sizeof(*A)*m*n);
+    cudaMalloc (( void **)&d_x ,n*sizeof(*x));
 
     cublasSetMatrix (m,n, sizeof (*A), A, m, d_A ,m);
     cublasSetVector (n, sizeof (*x) ,x ,1 ,d_x ,1);
@@ -161,13 +168,11 @@ devInfo   - if devInfo = 0, the operation is successful.
     int *devInfo = NULL;
     double *d_work = NULL;
     double *d_rwork = NULL;
-    double *d_W = NULL;  // W = S*VT
 
     cudaMalloc (( void **) &d_S ,n* sizeof(*S));
     cudaMalloc (( void **) &d_U ,m*m* sizeof(*U));
     cudaMalloc (( void **) &d_VT ,n*n* sizeof(*b));
     cudaMalloc (( void **) &devInfo ,sizeof(int));
-    cudaMalloc (( void **) &d_W ,m*n* sizeof(double));
 
     //Get working space of SVD
     cusolver_status = cusolverDnDgesvd_bufferSize(cusolverH, m, n, &lwork );
@@ -202,11 +207,11 @@ devInfo   - if devInfo = 0, the operation is successful.
 
     //Launch kernels to copy V, S, U values into Vk, Sk, Uk on device
     int numBlocks = 1;
-    dim3 threadsPerBlock(32, 16);
-    dim3 threadsPerBlockS(1, 16);
-    create_k_matrix<<<numBlocks,threadsPerBlock>>>(d_V, d_Vk, 32); //32 cols, 16 rows
-    create_k_matrix<<<numBlocks,threadsPerBlock>>>(d_U, d_Uk, 32); //32 cols, 16 rows
-    create_k_matrix<<<numBlocks,threadsPerBlockS>>>(d_S, d_Sk, 1); //1 col, 16 rows
+    dim3 threadsPerBlock(16, 32);
+    dim3 threadsPerBlockS(16, 1);
+    create_k_matrix<<<numBlocks,threadsPerBlock>>>(d_V, d_Vk, 16); //32 rows, 16 col
+    create_k_matrix<<<numBlocks,threadsPerBlock>>>(d_U, d_Uk, 16); //32 rows, 16 col
+    create_k_matrix<<<numBlocks,threadsPerBlockS>>>(d_S, d_Sk, 16); //16 rows, 1 col
 
 /*************************************************************
   (7)  Find x_k
@@ -238,7 +243,8 @@ ldc      - Leading dimension of C, ldc = lda = m
     double *d_bk;
     cudaMalloc (( void **) &d_bk ,(n/2)* sizeof(*b));
     
-    cublasDgemv(cublasH, CUBLAS_OP_T, m/2, n, &alpha, d_Uk, m/2, d_b, 1, &beta, d_bk, 1); //Forming d_bk
+    cublas_status = cublasDgemv(cublasH, CUBLAS_OP_T, m, n/2, &alpha, d_Uk, m, d_b, 1, &beta, d_bk, 1); //Forming d_bk
+    assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
     double *d_Si;
     cudaMalloc (( void **) &d_Si ,(n/2)* sizeof(*S)); //Forming d_Si, inverse of d_Sk
@@ -248,12 +254,13 @@ ldc      - Leading dimension of C, ldc = lda = m
     double *d_r;
     cudaMalloc (( void **) &d_r ,(n/2)* sizeof(*b));
 
-    cublasDdgmm(cublasH, CUBLAS_SIDE_LEFT, 16, 1, d_bk, 16, d_Si, 1, d_r, 16); //Creating d_r = diag(d_Si)*d_bk
+    cublas_status =  cublasDdgmm(cublasH, CUBLAS_SIDE_LEFT, 16, 1, d_bk, 16, d_Si, 1, d_r, 16); //Creating d_r = diag(d_Si)*d_bk
+    assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
     double *d_xk;
-    cudaMalloc (( void **) &d_xk ,(n/2)* sizeof(*x));
-    cublasDgemv(cublasH, CUBLAS_OP_N, m/2, n, &alpha, d_Vk, m/2, d_r, 1, &beta, d_xk, 1); //Forming d_xk
-
+    cudaMalloc (( void **) &d_xk ,n* sizeof(*x));
+    cublas_status = cublasDgemv(cublasH, CUBLAS_OP_N, m, n/2, &alpha, d_Vk, m, d_r, 1, &beta, d_xk, 1); //Forming d_xk
+    assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
 /*********************************************************************
   (8)   Compute error ||x_k-x||_2 using  cublasDnrm2
@@ -261,8 +268,35 @@ ldc      - Leading dimension of C, ldc = lda = m
   (9)   compute eta_k = ||A_kx_k-b||_2
         use cublasDgemv to get z = A_kx_k-b then use cublasDnrm2
 *********************************************************************************/
-    double dR_fro = 0.0;
-    cublas_status = cublasDnrm2(cublasH, n, d_A, 1, &dR_fro);
+
+    double *d_xe;
+    double norm_xe;
+
+    cudaMalloc ((void **) &d_xe, n* sizeof(*x));
+    cudaMalloc ((void **) &norm_xe,  sizeof(*x));
+    subtract<<<1,32>>>(d_x, d_xk, d_xe);
+
+    cublas_status = cublasDnrm2(cublasH, n, d_xe, 1, &norm_xe);
+    assert(CUBLAS_STATUS_SUCCESS == cublas_status);
+
+    
+    double *d_z;
+    double d_eta_k;
+    double *d_Ak;
+
+    cudaMalloc ((void **) &d_z, n* sizeof(*x));
+    cudaMalloc ((void **) &d_eta_k, sizeof(double));
+    cudaMalloc ((void **) &d_Ak, m*(n/2)* sizeof(*A));
+
+    create_k_matrix<<<numBlocks,threadsPerBlock>>>(d_A, d_Ak, 16);
+
+    cublas_status = cublasDgemv(cublasH, CUBLAS_OP_N, m, n/2, &alpha, d_Ak, m, d_xk, 1, &beta, d_z, 1); //Forming d_z = Akx_k
+    assert(CUBLAS_STATUS_SUCCESS == cublas_status);
+
+    subtract<<<1,32>>>(d_b, d_z, d_z);
+
+    cublas_status = cublasDnrm2(cublasH, n, d_z, 1, &d_eta_k);
+    assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 /*********************************************************************************
 cublasDnrm2(cublasH, lda*n, d_A, 1, &dR_fro);
 cublasH - handle
@@ -273,4 +307,44 @@ nrm     – Euclidean norm of x, nrm = &dR_fro
 *********************************************************************************/
 
 // (10) copy x_k and eta_k back to host
+    double * x_k = (double *)malloc(sizeof(double));
+    double * eta_k = (double *)malloc(sizeof(double));
+    double x_k;
+    double eta_k;
+
+
+    cudaMemcpy(x_k, &norm_xe, sizeof(double),cudaMemcpyDeviceToHost);
+    cudaMemcpy(eta_k, &d_eta_k, sizeof(double),cudaMemcpyDeviceToHost);
+
+    printf("Error: %10.3e\n", x_k);
+    printf("Residual Error: %10.3e\n", eta_k);
+
+    cudaFree(d_A);
+    cudaFree(d_x);
+    cudaFree(d_b);
+    cudaFree(d_S);
+    cudaFree(d_U);
+    cudaFree(d_VT);
+    cudaFree(devInfo);
+
+    cudaFree(d_V);
+    cudaFree(d_Sk);
+    cudaFree(d_Uk);
+    cudaFree(d_Vk);
+
+    cudaFree(d_bk);
+    cudaFree(d_Si);
+    cudaFree(d_xk);
+    cudaFree(d_r);
+
+    cudaFree(d_xe);
+    cudaFree(&norm_xe);
+
+    cudaFree(d_z);
+    cudaFree(&d_eta_k);
+    cudaFree(d_Ak);
+
+    if (cublasH ) cublasDestroy(cublasH);
+    if (cusolverH) cusolverDnDestroy(cusolverH);
+
 }
