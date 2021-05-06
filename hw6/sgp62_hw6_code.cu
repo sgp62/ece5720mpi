@@ -62,7 +62,6 @@ int main(int argc, char*argv[])
     cublas_status = cublasCreate(&cublasH);
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
-    //cublasSetPointerMode(cublasH, CUBLAS_POINTER_MODE_DEVICE);
 
 /* (1)&(2) read A from mymatrix.txt, set x to all ones*****************
    A is 32 by 32, so set m = n = 32
@@ -167,10 +166,11 @@ devInfo   - if devInfo = 0, the operation is successful.
     double * S = (double *)malloc(n*sizeof(double));
 
     int lwork = 0;
+    int info_gpu = 0;
 
-    double *d_S;
-    double *d_U;
-    double *d_VT;
+    double *d_S = NULL;
+    double *d_U = NULL;
+    double *d_VT = NULL;
     int *devInfo = NULL;
     double *d_work = NULL;
     double *d_rwork = NULL;
@@ -185,6 +185,7 @@ devInfo   - if devInfo = 0, the operation is successful.
     assert(cusolver_status == CUSOLVER_STATUS_SUCCESS);
 
     cudaStat1 = cudaMalloc((void**)&d_work , sizeof(double)*lwork);
+    cudaStat1 = cudaMalloc((void**)&d_rwork , sizeof(double)*lwork);
     assert(cudaSuccess == cudaStat1);
 
     cusolver_status = cusolverDnDgesvd(cusolverH, 'A', 'A', m, n, d_A, m, d_S, d_U, m, d_VT, m, d_work,
@@ -195,37 +196,15 @@ devInfo   - if devInfo = 0, the operation is successful.
     assert(CUSOLVER_STATUS_SUCCESS == cusolver_status);
     assert(cudaSuccess == cudaStat1);
 
-    // cudaMemcpy(S, d_S, n*m*sizeof(double),cudaMemcpyDeviceToHost);
-    // cudaMemcpy(U, d_U, n*m*sizeof(double),cudaMemcpyDeviceToHost);
-    // cudaMemcpy(VT, d_VT, n*m*sizeof(double),cudaMemcpyDeviceToHost);
-
-    // printf("U:\n");
-    // for(int i = 0; i < n; i++){
-    //     for(int j = 0; j < m; j++){
-    //         printf("%5.3e ",U[j*m+i]);
-    //     }
-    //     printf("\n");
-    // }
-    // printf("\n");
-    // printf("S:\n");
-    // for(int i = 0; i < n; i++){
-    //     printf("%5.3e ",S[i]);
-    // }
-    // printf("\n");
-    // printf("\n");
-    // printf("VT\n");
-    // for(int i = 0; i < n; i++){
-    //     for(int j = 0; j < m; j++){
-    //         printf("%5.3e ",VT[j*m+i]);
-    //     }
-    //     printf("\n");
-    // }
+    cudaMemcpy(S, d_S, n*sizeof(double),cudaMemcpyDeviceToHost);
+    cudaMemcpy(U, d_U, n*m*sizeof(double),cudaMemcpyDeviceToHost);
+    cudaMemcpy(VT, d_VT, n*m*sizeof(double),cudaMemcpyDeviceToHost);
+    cudaMemcpy(&info_gpu, devInfo, sizeof(int),cudaMemcpyDeviceToHost);
+    assert(0 == info_gpu);
 
 
-
-    //printf("%.16lf, %.16lf\n",t_S[0], t_S[n - 1]);
-    //printf("%.16lf, %.16lf\n",t_U[0], t_U[m*n - 1]);
-    // printf("%.16lf, %.16lf\n",t_VT[0], t_VT[m*n - 1]);
+    cudaMemcpy(d_U, U, n*m*sizeof(double),cudaMemcpyHostToDevice);
+    cudaMemcpy(d_VT, VT, n*m*sizeof(double),cudaMemcpyHostToDevice);
 
 
 
@@ -251,17 +230,6 @@ devInfo   - if devInfo = 0, the operation is successful.
     cudaMemcpy(d_Uk, d_U, m*(n/2)*sizeof(double),cudaMemcpyDeviceToDevice);
     cudaMemcpy(d_Vk, d_V, m*(n/2)*sizeof(double),cudaMemcpyDeviceToDevice);
 
-
-    //Launch kernels to copy V, S, U values into Vk, Sk, Uk on device
-    // int numBlocks = 1;
-    // dim3 threadsPerBlock(m/2, m);
-    // dim3 threadsPerBlockS(m/2, 1);
-    // create_k_matrix<<<numBlocks,threadsPerBlock>>>(d_V, d_Vk, m/2); //32 rows, 16 col
-    // cudaDeviceSynchronize();
-    // create_k_matrix<<<numBlocks,threadsPerBlock>>>(d_U, d_Uk, m/2); //32 rows, 16 col
-    // cudaDeviceSynchronize();
-    // create_k_matrix<<<numBlocks,threadsPerBlockS>>>(d_S, d_Sk, m/2); //16 rows, 1 col
-    // cudaDeviceSynchronize();
 
 /*************************************************************
   (7)  Find x_k
@@ -336,71 +304,23 @@ ldc      - Leading dimension of C, ldc = lda = m
     double d_eta_k;
     double *d_Ak;
 
+    double *temp_M;
+
     cudaMalloc ((void **) &d_z, n* sizeof(*x));
     cudaMalloc ((void **) &d_eta_k, sizeof(double));
-    cudaMalloc ((void **) &d_Ak, m*n* sizeof(*A));
+    cudaMalloc ((void **) &temp_M, n*(m/2)*sizeof(double));
+    cudaMalloc ((void **) &d_Ak, m*n* sizeof(*A)); //A_k = U_k * S_k * V_k_T
 
-    //create_k_matrix<<<numBlocks,threadsPerBlock>>>(d_A, d_Ak, 16);
-    //cudaDeviceSynchronize();
-
-    //Creating Ak
-    double * Ak = (double *)malloc(n*m*sizeof(double));
-    double * Uk = (double *)malloc(m*(m/2)*sizeof(double));
-    double * Vk = (double *)malloc(n*(n/2)*sizeof(double));
-    double * VkT = (double *)malloc(n*(n/2)*sizeof(double));
-    double * Sk = (double *)malloc((n/2)*sizeof(double));
-    double * Skx = (double *)malloc((n/2)*(n/2)*sizeof(double));
-
-    cudaMemcpy(Sk, d_Sk, n*sizeof(double),cudaMemcpyDeviceToHost);
-    cudaMemcpy(Uk, d_Uk, n*(m/2)*sizeof(double),cudaMemcpyDeviceToHost);
-    cudaMemcpy(Vk, d_Vk, n*(m/2)*sizeof(double),cudaMemcpyDeviceToHost);
-
-    for(int i = 0; i < n/2; i++){
-        for(int j = 0; j < n/2; j++){
-            if(i == j){
-                Skx[j*(n/2)+i] = Sk[i];
-            }
-            else{
-                Skx[j*(n/2)+i] = 0;
-            }
-        }
-    }
-    for(int i = 0; i < n; i++){
-        for(int j = 0; j < n/2; j++){
-            VkT[n*j+i] = Vk[n*i+j];
-        }
-    }
-
-    double * temp1 = (double *)malloc(n*(n/2)*sizeof(double));
-
-    for(int i = 0; i < n; i++){
-        for(int j = 0; j < n/2; j++){
-            temp1[j*n+i] = 0;
-            for(int k = 0; k < n/2; k++){
-                temp1[j*n+i] += Uk[k*n+i] * Skx[j*(n/2)+k];
-            }
-        }
-    }
-
-    for(int i = 0; i < n; i++){
-        for(int j = 0; j < n/2; j++){
-            Ak[j*n+i] = 0;
-            for(int k = 0; k < n; k++){
-                Ak[j*n+i] += temp1[k*n+i] * VkT[j*n+k];
-            }
-        }
-    }
-
-    cudaMemcpy(d_Ak, Ak, m*n*sizeof(double),cudaMemcpyHostToDevice);
-
+    cublasDdgmm(cublasH, CUBLAS_SIDE_RIGHT, m, n/2, d_Uk, m, d_Sk, 1, temp_M, m);//performs U_K * S_k and stores in temp
+    cudaDeviceSynchronize();
+    cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_T, m, n, n/2, &alpha, temp_M, m, d_Vk, n, &beta, d_Ak, n);//performs temp*V_k_T to create A_k
+    cudaDeviceSynchronize();
 
 
     double n_beta = -1.0;
-    //OH said we can use A instead of Ak
-    cublas_status = cublasDgemv(cublasH, CUBLAS_OP_N, m, n/2, &alpha, d_Ak, m, d_xk, 1, &n_beta, d_b, 1); //Forming d_b = Ax_k - d_b
+    cublas_status = cublasDgemv(cublasH, CUBLAS_OP_N, m, n, &alpha, d_Ak, m, d_xk, 1, &n_beta, d_b, 1); //Forming d_b = Ax_k - d_b
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
-    //subtract<<<1,32>>>(d_b, d_z, d_z);
 
     cublas_status = cublasDnrm2(cublasH, n, d_b, 1, &d_eta_k);
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
