@@ -62,6 +62,16 @@ int main(int argc, char*argv[])
     cublas_status = cublasCreate(&cublasH);
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
+    // timing variables
+	cudaEvent_t start, stop;
+	cudaEventCreate( &start ); 
+	cudaEventCreate( &stop ); 
+    float elapsedTime;
+
+
+
+    
+
 
 /* (1)&(2) read A from mymatrix.txt, set x to all ones*****************
    A is 32 by 32, so set m = n = 32
@@ -107,8 +117,10 @@ int main(int argc, char*argv[])
     cudaMalloc (( void **)&d_A , m*n*sizeof(*A));
     cudaMalloc (( void **)&d_x ,n*sizeof(*x));
 
+
     cublasSetMatrix (m,n, sizeof (*A), A, m, d_A ,m);
     cublasSetVector (n, sizeof (*x) ,x ,1 ,d_x ,1);
+    
 
 /*********************************************************************
 /*   (4) on the device call cublasDgemv to get b = A*x
@@ -136,7 +148,15 @@ incy   - input stride between consecutive elements of y.
 *********************************************************************************/
     double *d_b;
     cudaMalloc (( void **) &d_b ,n* sizeof(*b));
+    
+
+    cudaEventRecord( start, 0 );
     cublasDgemv(cublasH, CUBLAS_OP_N, m, n, &alpha, d_A, m, d_x, 1, &beta, d_b, 1); //Creating b = Ax  ( b = 1*A*x + 0*b )
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("b=Ax time %10.3e ms\n", elapsedTime);
+    
 
 /*********************************************************************
 /*   (5) on the device call cusolverDnDgesvd to get A = U*S*V^T
@@ -188,8 +208,13 @@ devInfo   - if devInfo = 0, the operation is successful.
     cudaStat1 = cudaMalloc((void**)&d_rwork , sizeof(double)*lwork);
     assert(cudaSuccess == cudaStat1);
 
+    cudaEventRecord( start, 0 );
     cusolver_status = cusolverDnDgesvd(cusolverH, 'A', 'A', m, n, d_A, m, d_S, d_U, m, d_VT, m, d_work,
-        lwork, d_rwork, devInfo);
+    lwork, d_rwork, devInfo);
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("SVD time %10.3e ms\n", elapsedTime);
 
 
     cudaStat1 = cudaDeviceSynchronize();
@@ -224,11 +249,23 @@ devInfo   - if devInfo = 0, the operation is successful.
     cudaMalloc (( void **) &d_Uk ,m*(m/2)* sizeof(*U));
     cudaMalloc (( void **) &d_Vk ,n*(n/2)* sizeof(*b));
 
+    cudaEventRecord( start, 0 );
     cublasDgeam(cublasH, CUBLAS_OP_T, CUBLAS_OP_N, m, n, &alpha, d_VT, m, &beta, d_V, m, d_V, m); //Transposes VT and places in V on device
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("VT time %10.3e ms\n", elapsedTime);
 
-    cudaMemcpy(d_Sk, d_S, (n/2)*sizeof(double),cudaMemcpyDeviceToDevice);
+    
+    cudaEventRecord( start, 0 );
+    cudaMemcpy(d_Sk, d_S, (n/2)*sizeof(double),cudaMemcpyDeviceToDevice); //Creating k matrices
     cudaMemcpy(d_Uk, d_U, m*(n/2)*sizeof(double),cudaMemcpyDeviceToDevice);
     cudaMemcpy(d_Vk, d_V, m*(n/2)*sizeof(double),cudaMemcpyDeviceToDevice);
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("k mat time %10.3e ms\n", elapsedTime);
+
 
 
 /*************************************************************
@@ -261,7 +298,13 @@ ldc      - Leading dimension of C, ldc = lda = m
     double *d_bk;
     cudaMalloc (( void **) &d_bk ,(n/2)* sizeof(*b));
 
+    cudaEventRecord( start, 0 );
     cublas_status = cublasDgemv(cublasH, CUBLAS_OP_T, m, n/2, &alpha, d_Uk, m, d_b, 1, &beta, d_bk, 1); //Forming d_bk
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("bk=UkTb time %10.3e ms\n", elapsedTime);
+
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
     double *d_Si;
@@ -273,12 +316,25 @@ ldc      - Leading dimension of C, ldc = lda = m
     double *d_r;
     cudaMalloc (( void **) &d_r ,(n/2)* sizeof(*b));
 
+    
+    cudaEventRecord( start, 0 );
     cublas_status =  cublasDdgmm(cublasH, CUBLAS_SIDE_LEFT, m/2, 1, d_bk, m/2, d_Si, 1, d_r, m/2); //Creating d_r = diag(d_Si)*d_bk
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("dk=diag(Si)bk time %10.3e ms\n", elapsedTime);
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
     double *d_xk;
     cudaMalloc (( void **) &d_xk ,n* sizeof(*x));
+    
+    cudaEventRecord( start, 0 );
     cublas_status = cublasDgemv(cublasH, CUBLAS_OP_N, m, n/2, &alpha, d_Vk, m, d_r, 1, &beta, d_xk, 1); //Forming d_xk
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("xk=Vkdk time %10.3e ms\n", elapsedTime);
+    assert(CUBLAS_STATUS_SUCCESS == cublas_status);
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
 /*********************************************************************
@@ -296,7 +352,13 @@ ldc      - Leading dimension of C, ldc = lda = m
     subtract<<<1,m>>>(d_x, d_xk, d_xe);
     cudaDeviceSynchronize();
 
+    
+    cudaEventRecord( start, 0 );
     cublas_status = cublasDnrm2(cublasH, n, d_xe, 1, &norm_xe);
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("Norm xe time %10.3e ms\n", elapsedTime);
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
     
@@ -311,18 +373,37 @@ ldc      - Leading dimension of C, ldc = lda = m
     cudaMalloc ((void **) &temp_M, n*(m/2)*sizeof(double));
     cudaMalloc ((void **) &d_Ak, m*n* sizeof(*A)); //A_k = U_k * S_k * V_k_T
 
+    cudaEventRecord( start, 0 );
     cublasDdgmm(cublasH, CUBLAS_SIDE_RIGHT, m, n/2, d_Uk, m, d_Sk, 1, temp_M, m);//performs U_K * S_k and stores in temp
     cudaDeviceSynchronize();
     cublasDgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_T, m, n, n/2, &alpha, temp_M, m, d_Vk, n, &beta, d_Ak, n);//performs temp*V_k_T to create A_k
     cudaDeviceSynchronize();
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("Ak=UkSkVk time %10.3e ms\n", elapsedTime);
 
 
     double n_beta = -1.0;
+
+    cudaEventRecord( start, 0 );
     cublas_status = cublasDgemv(cublasH, CUBLAS_OP_N, m, n, &alpha, d_Ak, m, d_xk, 1, &n_beta, d_b, 1); //Forming d_b = Ax_k - d_b
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("d_b=Akxk=db time %10.3e ms\n", elapsedTime);
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 
 
+    
+    cudaEventRecord( start, 0 );
     cublas_status = cublasDnrm2(cublasH, n, d_b, 1, &d_eta_k);
+    cudaEventRecord( stop, 0 );
+    cudaEventSynchronize( stop );
+    cudaEventElapsedTime( &elapsedTime, start, stop );
+    printf("Norm residual time %10.3e ms\n", elapsedTime);
+
+    assert(CUBLAS_STATUS_SUCCESS == cublas_status);
     assert(CUBLAS_STATUS_SUCCESS == cublas_status);
 /*********************************************************************************
 cublasDnrm2(cublasH, lda*n, d_A, 1, &dR_fro);
@@ -371,5 +452,6 @@ nrm     – Euclidean norm of x, nrm = &dR_fro
 
     if (cublasH ) cublasDestroy(cublasH);
     if (cusolverH) cusolverDnDestroy(cusolverH);
+    cudaEventDestroy(start); cudaEventDestroy(stop);
 
 }

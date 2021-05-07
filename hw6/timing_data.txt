@@ -1,0 +1,11 @@
+b=Ax time  5.674e-02 ms
+SVD time  3.959e+00 ms
+VT time  2.298e-02 ms
+k mat time  2.755e-02 ms
+bk=UkTb time  1.754e-02 ms
+dk=diag(Si)bk time  1.616e-02 ms
+xk=Vkdk time  1.738e-02 ms
+Norm xe time  1.168e-01 ms
+Ak=UkSkVk time  7.139e-02 ms
+d_b=Akxk=db time  1.478e-02 ms
+Norm residual time  9.386e-02 ms
